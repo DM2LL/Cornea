@@ -1,0 +1,251 @@
+# Written by Siamak Yousefi, 1/11/2018, Memphis
+# PLOS One special issue 2018
+#
+# 1. Reads Casia south datasets and applies inclusion/exclusion criteria 
+# 2. unsupervised clustering using pca, tsne, and density-based clustering
+# nPCs= 8, initial_dim= 6, perplexity= 34, max_iterations= 1000,  
+
+# mac:      /Users/siamakyousefi/Dropbox (UTHSC GGI)/
+# windows:  C:/Users/Siamak/Dropbox (UTHSC GGI)
+rm(list=ls())
+
+roott= "C:/Users/Siamak/"
+
+dirPath= paste0(roott, "Dropbox (UTHSC GGI)/Active Folder/R Programs/R-Jichi-Japan/")
+setwd(dirPath)
+
+# very immportant, this makes the results reproducible, always use 10 , simple to remember
+set.seed(10)
+
+library(colortools)  # color wheele
+library(mclust)      # model-based clustering
+library(cluster) 
+library(fpc)
+library(corrgram)
+library(dbscan)      # clustering
+library(tsne)
+library(Rtsne)       # faster tsne
+library(pastecs)     # statistics
+library(tigerstats)  # for nice side by side histograms
+library(skmeans)     # added 9/3/2018 , PLOS One reviewers asked to explore other clustering approaches
+
+color.vector.21= wheel("blue", num = 21)[c(1,4,7,10,13,16,19,2,5,8,11,14,17,20,3,7,10,13,16,19,21)]
+
+Data.casia= load("PLoSOne_Data_casia.RData")
+Data.casia.ehr= load("PLoSOne_Data_casia_ehr.RData")
+
+Data.casia.cs= Data.casia[!duplicated(Data.casia$idEye, fromLast= TRUE), ]   # 3,514 eyes
+
+
+Data.casia.used= Data.casia.ehr[!duplicated(Data.casia.ehr$idEye, fromLast= TRUE), ]   # 3,514 eyes  , includes diagnosis labels by physicians
+
+# excluding features with high NAs
+features.with.high.nas= names(Data.casia.cs)[ colSums(is.na(Data.casia.cs)) > 100 ]
+Data.casia.cs[, features.with.high.nas]= NULL
+# casia.data.reference= na.omit(Data.casia)
+
+# Ectasia labels
+labels= Data.casia.cs$ESI.Status
+labels.numeric= Data.casia.cs$ESI
+labels.anterior= Data.casia.cs$ESI.Anterior.
+labels.posterior= Data.casia.cs$ESI.Posterior.
+
+# excluding the labels the instrument gives us
+Data.casia.cs[, c("ESI.Status", "ESI", "ESI.Anterior.", "ESI.Posterior.")]= NULL
+
+idx.no.nas= which( rowSums(is.na(Data.casia.cs[, 9:ncol(Data.casia.cs)])) == 0 & labels !="N/A" )
+casia.data.clean.labels= Data.casia.cs[idx.no.nas, 9:ncol(Data.casia.cs)] # na.omit(Data.casia.cs[, 9:ncol(Data.casia.cs)])
+casia.data.clean= casia.data.clean.labels[,1:443]
+Data.casia.used.2= Data.casia.used[idx.no.nas, ] # includes diagnosis labels by physicians
+
+# updating labels
+labels= labels[idx.no.nas]
+labels.numeric= labels.numeric[idx.no.nas]
+labels.anterior= labels.anterior[idx.no.nas]
+labels.posterior=labels.posterior[idx.no.nas] 
+# -------------------------------- Insight to data
+insight.data= casia.data.clean[, 1:32]  #[,8:22]
+# all features scatterplot
+# pairs(insight.data, gap = 0, pch = ".")           # this plot takes time
+
+# 1. Scaling Normalizing data
+mydata <- data.frame((casia.data.clean))            # standardize variables
+# excluding constant features
+idx.constant.features= apply(mydata, 2, sd )==0
+mydata[, idx.constant.features]= NULL
+mydata= scale(mydata)
+
+# 2. PCA
+sCdata.pcaComps= prcomp(mydata, center= TRUE, scale = TRUE) 
+
+# 6/27/2018: most contributing features in our algorithm based on PCA ( loading )
+ranked.features= order(rowMeans(abs(sCdata.pcaComps$rotation)), decreasing= T)
+rownames(sCdata.pcaComps$rotation)[ranked.features]
+
+varPCs= sCdata.pcaComps[[1]]^2
+varPCs= 100*varPCs/sum(varPCs)
+varPCs_Cumsum= cumsum(varPCs/sum(varPCs)*100)
+
+# plotting components energy and varience
+color= color.vector.21[8] #rgb(0.35, 0.25, 0.75)
+plot(varPCs[1:40], type="o", main="", xlab="Principal component number", ylab="", cex.axis = 1.8,
+     col= color, lwd= 3, box.lty=7, box.lwd=5, box.col="black", cex= 2.6 , cex.lab= 2.0, pch= 19 )  # cex: magnification
+title(ylab= "Explained variance (%)", line= 2.5, cex.lab= 2.0)
+# 
+plot(varPCs_Cumsum[1:(length(varPCs_Cumsum)+1)], main="", xlab="PC Number", ylab="Total Variation in Data (%)",
+     col= color, lwd= 2.5, box.lty=7, box.lwd=5, box.col="black", cex.lab= 1.5, cex.main=1.6, type="b" )
+grid()
+
+# 2.1 clustering based on pc components only , more added on 1/16/2018
+allPCs= data.frame(sCdata.pcaComps[[5]])   # PCs
+# Quick way of creating a color vector for all instances
+instance.col.vec.pca= array("",length(allPCs$PC3))  # PC3 seperates data into two classes very nice
+instance.col.vec.pca[allPCs$PC3 < 0]= color.vector.21[1]
+instance.col.vec.pca[allPCs$PC3 >= 0]= color.vector.21[2]
+
+# corrgram of PCs
+corrgram(sCdata.pcaComps$x[,1:6], order= NULL, lower.panel= panel.pts,
+         upper.panel= NULL, text.panel= panel.txt, diag.panel= NULL, main="", pch= 19)
+
+
+
+set.seed(10)  # to generate reproducible plots
+tsneAxes= tsne(allPCs[,1:8], initial_config= NULL, k = 2, initial_dims= 6, perplexity= 34,
+               max_iter= 1000, min_cost= 0, epoch_callback= NULL, whiten= TRUE, epoch= 10)
+plot(tsneAxes, xlab="", ylab="", col= "gray", pch= 19, cex= 1.1 , cex.lab= 1.4, cex.axis= 1.2)  #  pch= 19, cex=1.1 )  # "gray" , labels
+title(xlab= "Topography eigen-parameter 1", line= 2.5, cex.lab= 1.4)
+title(ylab= "Topography eigen-parameter 2", line= 2.5, cex.lab= 1.4)
+
+
+# 4. Density-based clustering
+dbClusters= dbscan(tsneAxes, eps= 3.8)  # 3.8: ARVO 2018, this was 4.2 for the first nice plot
+dbClusters
+nClusterSamples= table(dbClusters$cluster)
+n= length(nClusterSamples)
+n
+
+# creating a color vector for all instances
+instance.col.vec= array("",c(length(dbClusters$cluster),1))
+centroid.tsne= matrix(0,nrow= n, ncol=2)
+for (i in c(0:(n-1))){
+  idx.cluster= dbClusters$cluster == i
+  instance.col.vec[idx.cluster]= rainbow(n+0)[(i+1)] # color.vector.21[(i+1)]
+  centroid.tsne[i+1, ]= colMeans(tsneAxes[idx.cluster,])
+}
+plot(tsneAxes, xlab="", ylab="", cex= 1.1 , pch= 19, col= instance.col.vec, cex.lab= 1.4, cex.axis= 1.2)  #  pch= 19, cex=1.1 )  # "gray" , labels
+title(xlab= "Corneal eigen-parameter 1", line= 2.5, cex.lab= 1.4)
+title(ylab= "Corneal eigen-parameter 2", line= 2.5, cex.lab= 1.4)
+text(centroid.tsne, c(paste("", 1:n, sep="")), cex= 1.6)
+legend(-95,100, 1:n, lty= rep(1,n), lwd= rep(4,n), col= rainbow(n+0), cex= 0.95)
+
+# first step of removing borderline samples (based on Macosko)
+clustersToBeRemoved= ( nClusterSamples <= 7 )    # ARVO 2018: 7
+idxToBeRemoved= which(dbClusters$cluster %in% (0:(n-1))[clustersToBeRemoved]) # sort(match(clustersToBeRemoved,dbClusters$cluster))
+tsneAxesNew= tsneAxes[-c(idxToBeRemoved),]
+instance.col.vec.New= instance.col.vec[-c(idxToBeRemoved)]
+
+# updating labels and data
+casia.data.clean.new= casia.data.clean[-c(idxToBeRemoved),]
+labels.new= labels[-c(idxToBeRemoved)]
+labels.numeric.new= labels.numeric[-c(idxToBeRemoved)]
+labels.anterior.new= labels.anterior[-c(idxToBeRemoved)]
+labels.posterior.new=labels.posterior[-c(idxToBeRemoved)] 
+Data.casia.used.new= Data.casia.used.2[-c(idxToBeRemoved), ]    # this file includes the diagnosis labels by physicians
+
+
+# DBSCAN clustering
+dbClustersNew= dbscan(tsneAxesNew, eps= 4.5)    #       eps= 4.5 ARVO 2018
+dbClustersNew
+plot(tsneAxesNew, col=dbClustersNew$cluster, main="", xlab="", ylab="", pch= 19, cex= 1.1 , cex.lab= 1.4, cex.axis= 1.2)  #  pch= 19, cex=1.1 )  # "gray" , labels
+title(xlab= "Corneal eigen-parameter 1", line= 2.5, cex.lab= 1.4)
+title(ylab= "Corneal eigen-parameter 2", line= 2.5, cex.lab= 1.4)
+
+# second step of removing borderline samples (based on Macosko)
+nClusterSamples= table(dbClustersNew$cluster)
+clustersToBeRemoved= ( nClusterSamples <= 25 )
+idxToBeRemoved.2= which(dbClustersNew$cluster %in% (0:(n-1))[clustersToBeRemoved]) # sort(match(clustersToBeRemoved,dbClustersNew$cluster))
+tsneAxesNew2= tsneAxesNew[-c(idxToBeRemoved.2),]
+tsne.labels.new2= dbClustersNew$cluster[-c(idxToBeRemoved.2)]
+instance.col.vec.New2= instance.col.vec.New[-c(idxToBeRemoved.2)]
+
+instance.col.vec.new2= array("",c(nrow(tsneAxesNew2),1))
+for (i in c(1:4)){
+  idx.cluster= tsne.labels.new2 == i
+  instance.col.vec.new2[idx.cluster]= rainbow(5)[i+1] # color.vector.21[(i+1)]
+}
+# jpeg low-resolution , low resolution
+plot(tsneAxesNew2, col= instance.col.vec.new2, xlab="", ylab="", pch= 19, cex= 1.1 , cex.lab= 1.4, cex.axis= 1.2)  #  pch= 19, cex=1.1 )  # "gray" , labels
+title(xlab= "Corneal eigen-parameter 1", line= 2.5, cex.lab= 1.4)
+title(ylab= "Corneal eigen-parameter 2", line= 2.5, cex.lab= 1.4)
+str= paste(fig.path, "clustering.jpeg",sep="")
+# dev.copy(jpeg, str)
+# dev.off()
+
+# tiff high-resulution , high resolution
+str= paste(fig.path, "clustering.tiff",sep="")
+# tiff(str, width= 2.5, height= 2.5, units= 'in', pointsize = 4, res= 300 )
+plot(tsneAxesNew2, col= instance.col.vec.new2, xlab="", ylab="", pch= 19, cex= 1.1 , cex.lab= 1.4, cex.axis= 1.2)  #  pch= 19, cex=1.1 )  # "gray" , labels
+title(xlab= "Corneal eigen-parameter 1", line= 2.5, cex.lab= 1.4)
+title(ylab= "Corneal eigen-parameter 2", line= 2.5, cex.lab= 1.4)
+str= paste(fig.path, "clustering.jpeg",sep="")
+# dev.off()
+
+
+
+plot(tsneAxesNew2, col= "gray", xlab="", ylab="", pch= 19, cex= 1.1 , cex.lab= 1.4, cex.axis= 1.2)  #  pch= 19, cex=1.1 )  # "gray" , labels
+title(xlab= "Corneal eigen-parameter 1", line= 2.5, cex.lab= 1.4)
+title(ylab= "Corneal eigen-parameter 2", line= 2.5, cex.lab= 1.4)
+str= paste(fig.path, "Video/51Casia_new_south_bw.jpeg",sep="")
+# dev.copy(jpeg, str)
+# dev.off()
+
+# points(tsneAxesNew2[dbClustersNew2$cluster==3,], pch = ".", cex=2, col = "white")
+
+# updating labels and data,      3,156 eyes remained for the final analysis
+casia.data.clean.new2= casia.data.clean.new[-c(idxToBeRemoved.2),]
+labels.new2= labels.new[-c(idxToBeRemoved.2)]
+labels.numeric.new2= labels.numeric.new[-c(idxToBeRemoved.2)]
+labels.anterior.new2= labels.anterior.new[-c(idxToBeRemoved.2)]
+labels.posterior.new2= labels.posterior.new[-c(idxToBeRemoved.2)] 
+Data.casia.used.new2= Data.casia.used.new[-c(idxToBeRemoved.2), ]    # updating data
+
+# plots based on actual labels
+rbPal= colorRampPalette( c("gray","red") )
+color.density.anterior=  rbPal(100)[as.numeric(cut(labels.anterior.new2,  breaks= 101))] # Break points in sorted order to indicate the intervals for assigning the colors. Note that if there are nlevel colors there should be (nlevel+1) breakpoints.
+color.density.posterior= rbPal(100)[as.numeric(cut(labels.posterior.new2, breaks= 101))]
+color.density= rbPal(100)[as.numeric(cut(labels.numeric.new2, breaks= 101))]
+# Note, I don't know why color red,corresponding to labels.anterior.new2=95 gets NA, this is temp way to get around this: red= "#FF0000"
+color.density.anterior[is.na(color.density.anterior)]= "#FF0000"
+color.density.posterior[is.na(color.density.posterior)]= "#FF0000"
+color.density[is.na(color.density)]= "#FF0000"
+
+str= paste(fig.path, "ESI_Anterior_2.tiff", sep="")
+# tiff(str, width= 2.5, height= 2.5, units= 'in', pointsize = 4, res= 300 )
+plot(tsneAxesNew2, col= color.density.anterior, xlab="", ylab="", pch= 19, cex= 1.1 , cex.lab= 1.4, cex.axis= 1.2)  #  pch= 19, cex=1.1 )  # "gray" , labels
+title(xlab= "Corneal eigen-parameter 1", line= 2.5, cex.lab= 1.4)
+title(ylab= "Corneal eigen-parameter 2", line= 2.5, cex.lab= 1.4)
+# dev.off()
+
+str= paste(fig.path, "ESI_Posterior_2.tiff", sep="")
+# tiff(str, width= 2.5, height= 2.5, units= 'in', pointsize = 4, res= 300 )
+plot(tsneAxesNew2, col= color.density.posterior, main="", xlab="", ylab="", pch= 19, cex= 1.1 , cex.lab= 1.4, cex.axis= 1.2)  #  pch= 19, cex=1.1 )  # "gray" , labels
+title(xlab= "Corneal eigen-parameter 1", line= 2.5, cex.lab= 1.4)
+title(ylab= "Corneal eigen-parameter 2", line= 2.5, cex.lab= 1.4)
+# dev.off()
+
+str= paste(fig.path, "ESI_All_2.tiff", sep="")
+# tiff(str, width= 2.5, height= 2.5, units= 'in', pointsize = 4, res= 300 )
+plot(tsneAxesNew2, col= color.density, main="", xlab="", ylab="", pch= 19, cex= 1.1 , cex.lab= 1.4, cex.axis= 1.2)  #  pch= 19, cex=1.1 )  # "gray" , labels
+title(xlab= "Corneal eigen-parameter 1", line= 2.5, cex.lab= 1.4)
+title(ylab= "Corneal eigen-parameter 2", line= 2.5, cex.lab= 1.4)
+# color.bar(rbPal(100), 0, 100)
+# str= paste(fig.path, "ESI_All_2.jpeg",sep="")
+# dev.off()
+
+str= paste(fig.path, "clustering_with_Labels.tiff", sep="")
+# tiff(str, width= 2.4, height= 2.5, units= 'in', pointsize = 4, res= 300 )
+plot(tsneAxesNew2, col= labels.new2, main="", xlab="", ylab="", pch= 19, cex= 1.1 , cex.lab= 1.4, cex.axis= 1.2)  #  pch= 19, cex=1.1 )  # "gray" , labels
+title(xlab= "Corneal eigen-parameter 1", line= 2.5, cex.lab= 1.4)
+title(ylab= "Corneal eigen-parameter 2", line= 2.5, cex.lab= 1.4)
+legend(51,95, c("Keratoconus", "Kertoconus-suspect", "Normal"), lty= rep(1,3), lwd= rep(4,3), col= c("black", "blue", "green"), cex= 0.9)
+# dev.off()
