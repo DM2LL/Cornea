@@ -118,7 +118,7 @@ title(ylab= "Topography eigen-parameter 2", line= 2.5, cex.lab= 1.4)
 
 
 # 4. Density-based clustering
-dbClusters= dbscan(tsneAxes, eps= 3.8)  # 3.8: ARVO 2018, this was 4.2 for the first nice plot
+dbClusters= dbscan(tsneAxes, eps= 4.2)  # 3.8: ARVO 2018, this was 4.2 for the first nice plot
 dbClusters
 nClusterSamples= table(dbClusters$cluster)
 n= length(nClusterSamples)
