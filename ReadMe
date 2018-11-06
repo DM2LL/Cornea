@@ -1,1 +1,1 @@
-Just run PLoSOne file and you are good to go. make sure the two RData files are located in the same folder as your PLoSOne.R file.
+Run the PLoSOne program in R and make sure you have copied the datasets (the two RData files) in the same folder as your PLoSOne.R file sits.
