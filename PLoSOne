@@ -4,4 +4,96 @@
 # 1. Reads Casia south datasets and applies inclusion/exclusion criteria 
 # 2. unsupervised clustering using pca, tsne, and density-based clustering
 
-Code will become avaibalble once the patent application completed. 
+# Code will become avaibalble once the patent application completed. 
+# very immportant, this makes the results reproducible, always use 10 , simple to remember
+set.seed(10)
+
+library(colortools)  # color wheele
+library(mclust)      # model-based clustering
+library(cluster) 
+library(fpc)
+library(corrgram)
+library(dbscan)      # clustering
+library(tsne)
+library(Rtsne)       # faster tsne
+library(pastecs)     # statistics
+library(tigerstats)  # for nice side by side histograms
+library(skmeans)     # added 9/3/2018 , PLOS One reviewers asked to explore other clustering approaches
+
+color.vector.21= wheel("blue", num = 21)[c(1,4,7,10,13,16,19,2,5,8,11,14,17,20,3,7,10,13,16,19,21)]
+
+load("C:/Users/Siamak/Dropbox (UTHSC GGI)/Active Folder/R Programs/R-Jichi-Japan/outputData/PLoSOne_Data_casia.RData")
+load("C:/Users/Siamak/Dropbox (UTHSC GGI)/Active Folder/R Programs/R-Jichi-Japan/outputData/PLoSOne_Data_casia_ehr.RData")
+
+Data.casia.cs= Data.casia[!duplicated(Data.casia$idEye, fromLast= TRUE), ]   # 3,514 eyes
+
+
+Data.casia.used= Data.casia.ehr[!duplicated(Data.casia.ehr$idEye, fromLast= TRUE), ]   # 3,514 eyes  , includes diagnosis labels by physicians
+
+# excluding features with high NAs
+features.with.high.nas= names(Data.casia.cs)[ colSums(is.na(Data.casia.cs)) > 100 ]
+Data.casia.cs[, features.with.high.nas]= NULL
+# casia.data.reference= na.omit(Data.casia)
+
+# Ectasia labels
+labels= Data.casia.cs$ESI.Status
+labels.numeric= Data.casia.cs$ESI
+labels.anterior= Data.casia.cs$ESI.Anterior.
+labels.posterior= Data.casia.cs$ESI.Posterior.
+
+# excluding the labels the instrument gives us
+Data.casia.cs[, c("ESI.Status", "ESI", "ESI.Anterior.", "ESI.Posterior.")]= NULL
+
+idx.no.nas= which( rowSums(is.na(Data.casia.cs[, 9:ncol(Data.casia.cs)])) == 0 & labels !="N/A" )
+casia.data.clean.labels= Data.casia.cs[idx.no.nas, 9:ncol(Data.casia.cs)] # na.omit(Data.casia.cs[, 9:ncol(Data.casia.cs)])
+casia.data.clean= casia.data.clean.labels[,1:443]
+Data.casia.used.2= Data.casia.used[idx.no.nas, ] # includes diagnosis labels by physicians
+
+# updating labels
+labels= labels[idx.no.nas]
+labels.numeric= labels.numeric[idx.no.nas]
+labels.anterior= labels.anterior[idx.no.nas]
+labels.posterior=labels.posterior[idx.no.nas] 
+# -------------------------------- Insight to data
+insight.data= casia.data.clean[, 1:32]  #[,8:22]
+# all features scatterplot
+# pairs(insight.data, gap = 0, pch = ".")           # this plot takes time
+
+# 1. Scaling Normalizing data
+mydata <- data.frame((casia.data.clean))            # standardize variables
+# excluding constant features
+idx.constant.features= apply(mydata, 2, sd )==0
+mydata[, idx.constant.features]= NULL
+mydata= scale(mydata)
+
+# 2. PCA
+sCdata.pcaComps= prcomp(mydata, center= TRUE, scale = TRUE) 
+
+# 6/27/2018: most contributing features in our algorithm based on PCA ( loading )
+ranked.features= order(rowMeans(abs(sCdata.pcaComps$rotation)), decreasing= T)
+rownames(sCdata.pcaComps$rotation)[ranked.features]
+
+varPCs= sCdata.pcaComps[[1]]^2
+varPCs= 100*varPCs/sum(varPCs)
+varPCs_Cumsum= cumsum(varPCs/sum(varPCs)*100)
+
+# plotting components energy and varience
+color= color.vector.21[8] #rgb(0.35, 0.25, 0.75)
+plot(varPCs[1:40], type="o", main="", xlab="Principal component number", ylab="", cex.axis = 1.8,
+     col= color, lwd= 3, box.lty=7, box.lwd=5, box.col="black", cex= 2.6 , cex.lab= 2.0, pch= 19 )  # cex: magnification
+title(ylab= "Explained variance (%)", line= 2.5, cex.lab= 2.0)
+# 
+plot(varPCs_Cumsum[1:(length(varPCs_Cumsum)+1)], main="", xlab="PC Number", ylab="Total Variation in Data (%)",
+     col= color, lwd= 2.5, box.lty=7, box.lwd=5, box.col="black", cex.lab= 1.5, cex.main=1.6, type="b" )
+grid()
+
+# 2.1 clustering based on pc components only , more added on 1/16/2018
+allPCs= data.frame(sCdata.pcaComps[[5]])   # PCs
+# Quick way of creating a color vector for all instances
+instance.col.vec.pca= array("",length(allPCs$PC3))  # PC3 seperates data into two classes very nice
+instance.col.vec.pca[allPCs$PC3 < 0]= color.vector.21[1]
+instance.col.vec.pca[allPCs$PC3 >= 0]= color.vector.21[2]
+
+# corrgram of PCs
+corrgram(sCdata.pcaComps$x[,1:6], order= NULL, lower.panel= panel.pts,
+         upper.panel= NULL, text.panel= panel.txt, diag.panel= NULL, main="", pch= 19)
