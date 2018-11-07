@@ -22,8 +22,8 @@ library(skmeans)     # added 9/3/2018 , PLOS One reviewers asked to explore othe
 
 color.vector.21= wheel("blue", num = 21)[c(1,4,7,10,13,16,19,2,5,8,11,14,17,20,3,7,10,13,16,19,21)]
 
-load("C:/Users/Siamak/Dropbox (UTHSC GGI)/Active Folder/R Programs/R-Jichi-Japan/outputData/PLoSOne_Data_casia.RData")
-load("C:/Users/Siamak/Dropbox (UTHSC GGI)/Active Folder/R Programs/R-Jichi-Japan/outputData/PLoSOne_Data_casia_ehr.RData")
+load("PLoSOne_Data_casia.RData")
+load("PLoSOne_Data_casia_ehr.RData")
 
 Data.casia.cs= Data.casia[!duplicated(Data.casia$idEye, fromLast= TRUE), ]   # 3,514 eyes
 
@@ -97,3 +97,5 @@ instance.col.vec.pca[allPCs$PC3 >= 0]= color.vector.21[2]
 # corrgram of PCs
 corrgram(sCdata.pcaComps$x[,1:6], order= NULL, lower.panel= panel.pts,
          upper.panel= NULL, text.panel= panel.txt, diag.panel= NULL, main="", pch= 19)
+
+load ()
